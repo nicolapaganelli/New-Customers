@@ -1,15 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAnalytics } from "firebase/analytics";
+import { getAnalytics, isSupported as analyticsIsSupported } from "firebase/analytics";
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { 
   getFirestore, collection, onSnapshot, addDoc, doc, setDoc, deleteDoc, updateDoc
 } from 'firebase/firestore';
 
 // --- Firebase Initialization ---
-// The environment provides these variables automatically.
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+// GitHub Pages does NOT provide `__initial_auth_token` / `__app_id`.
+// Keep the config in-code for now, but make runtime behavior robust.
 const firebaseConfig = {
   apiKey: "AIzaSyC0nI2JVHGbO0CUywA4Xa28dBWPo5DHxNA",
   authDomain: "new-customers-eee3a.firebaseapp.com",
@@ -22,14 +21,26 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
+void (async () => {
+  try {
+    if (await analyticsIsSupported()) {
+      getAnalytics(app);
+    }
+  } catch {
+    // Analytics is optional; avoid breaking the app if it isn't supported.
+  }
+})();
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'displate-workshop';
+const appId =
+  (import.meta?.env?.VITE_FIREBASE_APP_ID?.trim?.() || '') ||
+  (typeof __app_id !== 'undefined' ? __app_id : '') ||
+  'displate-workshop';
 
 export default function App() {
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState('intro');
+  const [firebaseError, setFirebaseError] = useState(null);
   
   // Collaborative State
   const [badIdeas, setBadIdeas] = useState([]);
@@ -60,6 +71,7 @@ export default function App() {
           await signInAnonymously(auth);
         }
       } catch (err) {
+        setFirebaseError(err);
         console.error("Authentication failed:", err);
       }
     };
@@ -76,19 +88,28 @@ export default function App() {
     const badIdeasRef = collection(db, 'artifacts', appId, 'public', 'data', 'bad_ideas');
     const unsubBad = onSnapshot(badIdeasRef, (snap) => {
       setBadIdeas(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.createdAt - a.createdAt));
-    }, console.error);
+    }, (err) => {
+      setFirebaseError(err);
+      console.error(err);
+    });
 
     // Listen to ERRC Grid
     const errcRef = collection(db, 'artifacts', appId, 'public', 'data', 'errc_ideas');
     const unsubErrc = onSnapshot(errcRef, (snap) => {
       setErrcIdeas(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.createdAt - b.createdAt));
-    }, console.error);
+    }, (err) => {
+      setFirebaseError(err);
+      console.error(err);
+    });
 
     // Listen to Pitches
     const pitchesRef = collection(db, 'artifacts', appId, 'public', 'data', 'pitches');
     const unsubPitches = onSnapshot(pitchesRef, (snap) => {
       setPitches(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.createdAt - a.createdAt));
-    }, console.error);
+    }, (err) => {
+      setFirebaseError(err);
+      console.error(err);
+    });
 
     // Listen to Global Workshop State (Timer & Top 3)
     const stateRef = doc(db, 'artifacts', appId, 'public', 'data', 'workshop_state', 'global');
@@ -102,7 +123,10 @@ export default function App() {
           timer: { isRunning: false, remaining: 10800000, targetEndTime: 0 } 
         });
       }
-    }, console.error);
+    }, (err) => {
+      setFirebaseError(err);
+      console.error(err);
+    });
 
     return () => { unsubBad(); unsubErrc(); unsubPitches(); unsubState(); };
   }, [user]);
@@ -278,6 +302,11 @@ export default function App() {
 
   return (
     <div className="antialiased min-h-screen flex flex-col relative overflow-x-hidden" style={{ backgroundColor: colors.alabaster, color: colors.eerieBlack, fontFamily: "'Inter', system-ui, sans-serif" }}>
+      {firebaseError && (
+        <div className="w-full text-sm font-bold px-4 py-3 border-b-4" style={{ backgroundColor: colors.redHi, borderColor: colors.red, color: colors.redDeep }}>
+          Firebase error: {firebaseError?.code ? `${firebaseError.code} — ` : ''}{firebaseError?.message || String(firebaseError)}
+        </div>
+      )}
       
       {/* Global CSS for specifics */}
       <style>{`
