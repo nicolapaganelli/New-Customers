@@ -10,13 +10,13 @@ import {
 // GitHub Pages does NOT provide `__initial_auth_token` / `__app_id`.
 // Keep the config in-code for now, but make runtime behavior robust.
 const firebaseConfig = {
-  apiKey: "AIzaSyC0nI2JVHGbO0CUywA4Xa28dBWPo5DHxNA",
-  authDomain: "new-customers-eee3a.firebaseapp.com",
-  projectId: "new-customers-eee3a",
-  storageBucket: "new-customers-eee3a.firebasestorage.app",
-  messagingSenderId: "16173551692",
-  appId: "1:16173551692:web:6e7f98af195c7d7c56e4e9",
-  measurementId: "G-0EH8V9MP1C"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
 
 // Initialize Firebase
@@ -33,7 +33,7 @@ void (async () => {
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId =
-  (import.meta?.env?.VITE_FIREBASE_APP_ID?.trim?.() || '') ||
+  (import.meta.env.VITE_FIREBASE_APP_NAMESPACE?.trim?.() || '') ||
   (typeof __app_id !== 'undefined' ? __app_id : '') ||
   'displate-workshop';
 
