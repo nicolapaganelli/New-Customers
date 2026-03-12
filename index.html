@@ -2,9 +2,42 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>new-customers</title>
+    <title>Displate AI Customer Acquisition Workshop</title>
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              displate: {
+                white: '#FFFFFF',
+                alabaster: '#F4F7F3',
+                dimGrey: '#6B6B6A',
+                eerieBlack: '#1B1B1B',
+                nightBlack: '#0E0E0E',
+                blue: { DEFAULT: '#0062FF', highlight: '#E7F0FF', deep: '#0047B3' },
+                red: { DEFAULT: '#FF0000', highlight: '#FFF1F1', deep: '#B30000' },
+                cyan: { DEFAULT: '#00E0FF', highlight: '#E0FBFF', deep: '#00A3BA' },
+                orange: { DEFAULT: '#FF8A00', highlight: '#FFF4E6', deep: '#B36100' },
+                magenta: { DEFAULT: '#FF00FF', highlight: '#FFE6FF', deep: '#B300B3' },
+                lime: { DEFAULT: '#D9FF00', highlight: '#FAFFEB', deep: '#99B300' }
+              }
+            },
+            fontFamily: {
+              heading: ['"Polymath Display Black"', 'Inter', 'system-ui', 'sans-serif'],
+              body: ['Inter', 'system-ui', 'sans-serif']
+            }
+          }
+        }
+      }
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   </head>
   <body>
     <div id="root"></div>
