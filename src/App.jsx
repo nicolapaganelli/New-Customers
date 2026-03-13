@@ -41,6 +41,15 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState('intro');
   const [firebaseError, setFirebaseError] = useState(null);
+  const [displayName, setDisplayName] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    try {
+      return localStorage.getItem('workshopDisplayName') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [nameInput, setNameInput] = useState('');
   
   // Collaborative State
   const [badIdeas, setBadIdeas] = useState([]);
@@ -53,13 +62,30 @@ export default function App() {
 
   // Local UI State
   const [newBadIdea, setNewBadIdea] = useState('');
+  const [editingBadIdeaId, setEditingBadIdeaId] = useState(null);
+  const [editingBadIdeaText, setEditingBadIdeaText] = useState('');
   const [errcInputs, setErrcInputs] = useState({ eliminate: '', reduce: '', raise: '', create: '' });
+  const [editingErrcId, setEditingErrcId] = useState(null);
+  const [editingErrcText, setEditingErrcText] = useState('');
   const [pitchForm, setPitchForm] = useState({ name: '', concept: '', audience: '', impact: 'CAC' });
+  const [editingPitchId, setEditingPitchId] = useState(null);
+  const [editingPitchForm, setEditingPitchForm] = useState({ name: '', concept: '', audience: '', impact: 'CAC' });
   const [flippedCards, setFlippedCards] = useState({});
   const [timerDisplay, setTimerDisplay] = useState('03:00:00');
 
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
+
+  const handleSaveDisplayName = () => {
+    const trimmed = nameInput.trim();
+    if (!trimmed) return;
+    setDisplayName(trimmed);
+    try {
+      localStorage.setItem('workshopDisplayName', trimmed);
+    } catch {
+      // ignore storage issues
+    }
+  };
 
   // --- 1. Authentication ---
   useEffect(() => {
@@ -165,6 +191,37 @@ export default function App() {
     await updateDoc(stateRef, { timer: newTimerState });
   };
 
+  const resetTimer = async () => {
+    if (!user) return;
+    const stateRef = doc(db, 'artifacts', appId, 'public', 'data', 'workshop_state', 'global');
+    const resetState = {
+      isRunning: false,
+      remaining: 10800000, // 3 hours default
+      targetEndTime: 0,
+    };
+    await updateDoc(stateRef, { timer: resetState });
+  };
+
+  const setTimerFromPrompt = async () => {
+    if (!user) return;
+    const currentMinutes = Math.max(
+      1,
+      Math.round((workshopState.timer.remaining || 10800000) / 60000),
+    );
+    const raw = window.prompt('Set global countdown (minutes):', String(currentMinutes));
+    if (!raw) return;
+    const minutes = Number(raw);
+    if (!Number.isFinite(minutes) || minutes <= 0) return;
+    const ms = Math.round(minutes * 60 * 1000);
+    const stateRef = doc(db, 'artifacts', appId, 'public', 'data', 'workshop_state', 'global');
+    const newState = {
+      isRunning: false,
+      remaining: ms,
+      targetEndTime: 0,
+    };
+    await updateDoc(stateRef, { timer: newState });
+  };
+
   // --- 4. Chart.js Injection & Initialization ---
   useEffect(() => {
     if (activeTab === 'intro') {
@@ -233,36 +290,136 @@ export default function App() {
 
   // --- 5. Data Mutators ---
   const handleAddBadIdea = async () => {
-    if (!newBadIdea.trim() || !user) return;
+    if (!newBadIdea.trim() || !user || !displayName.trim()) return;
     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'bad_ideas'), {
       text: newBadIdea.trim(),
       createdAt: Date.now(),
-      author: user.uid.substring(0, 6)
+      authorId: user.uid,
+      authorName: displayName.trim(),
     });
     setNewBadIdea('');
   };
 
+  const startEditBadIdea = (idea) => {
+    if (!user || idea.authorId !== user.uid) return;
+    setEditingBadIdeaId(idea.id);
+    setEditingBadIdeaText(idea.text);
+  };
+
+  const cancelEditBadIdea = () => {
+    setEditingBadIdeaId(null);
+    setEditingBadIdeaText('');
+  };
+
+  const saveEditBadIdea = async () => {
+    if (!editingBadIdeaId || !editingBadIdeaText.trim() || !user) return;
+    const ideaRef = doc(db, 'artifacts', appId, 'public', 'data', 'bad_ideas', editingBadIdeaId);
+    await updateDoc(ideaRef, { text: editingBadIdeaText.trim() });
+    setEditingBadIdeaId(null);
+    setEditingBadIdeaText('');
+  };
+
+  const deleteBadIdea = async (idea) => {
+    if (!user || idea.authorId !== user.uid) return;
+    const ideaRef = doc(db, 'artifacts', appId, 'public', 'data', 'bad_ideas', idea.id);
+    await deleteDoc(ideaRef);
+    if (editingBadIdeaId === idea.id) {
+      setEditingBadIdeaId(null);
+      setEditingBadIdeaText('');
+    }
+  };
+
   const handleAddErrc = async (category) => {
-    if (!errcInputs[category].trim() || !user) return;
+    if (!errcInputs[category].trim() || !user || !displayName.trim()) return;
     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'errc_ideas'), {
       category,
       text: errcInputs[category].trim(),
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      authorId: user.uid,
+      authorName: displayName.trim(),
     });
     setErrcInputs(prev => ({ ...prev, [category]: '' }));
   };
 
+  const startEditErrc = (idea) => {
+    if (!user || (idea.authorId && idea.authorId !== user.uid)) return;
+    setEditingErrcId(idea.id);
+    setEditingErrcText(idea.text);
+  };
+
+  const cancelEditErrc = () => {
+    setEditingErrcId(null);
+    setEditingErrcText('');
+  };
+
+  const saveEditErrc = async () => {
+    if (!editingErrcId || !editingErrcText.trim() || !user) return;
+    const ref = doc(db, 'artifacts', appId, 'public', 'data', 'errc_ideas', editingErrcId);
+    await updateDoc(ref, { text: editingErrcText.trim() });
+    setEditingErrcId(null);
+    setEditingErrcText('');
+  };
+
+  const deleteErrc = async (idea) => {
+    if (!user || (idea.authorId && idea.authorId !== user.uid)) return;
+    const ref = doc(db, 'artifacts', appId, 'public', 'data', 'errc_ideas', idea.id);
+    await deleteDoc(ref);
+    if (editingErrcId === idea.id) {
+      setEditingErrcId(null);
+      setEditingErrcText('');
+    }
+  };
+
   const handleAddPitch = async () => {
-    if (!pitchForm.name.trim() || !pitchForm.concept.trim() || !user) {
+    if (!pitchForm.name.trim() || !pitchForm.concept.trim() || !user || !displayName.trim()) {
       alert("Name and Concept are required.");
       return;
     }
     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pitches'), {
       ...pitchForm,
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      authorId: user.uid,
+      authorName: displayName.trim(),
     });
     setPitchForm({ name: '', concept: '', audience: '', impact: 'CAC' });
     alert("Pitch submitted to the board globally!");
+  };
+
+  const startEditPitch = (pitch) => {
+    if (!user || (pitch.authorId && pitch.authorId !== user.uid)) return;
+    setEditingPitchId(pitch.id);
+    setEditingPitchForm({
+      name: pitch.name || '',
+      concept: pitch.concept || '',
+      audience: pitch.audience || '',
+      impact: pitch.impact || 'CAC',
+    });
+  };
+
+  const cancelEditPitch = () => {
+    setEditingPitchId(null);
+    setEditingPitchForm({ name: '', concept: '', audience: '', impact: 'CAC' });
+  };
+
+  const saveEditPitch = async () => {
+    if (!editingPitchId || !user || !editingPitchForm.name.trim() || !editingPitchForm.concept.trim()) return;
+    const ref = doc(db, 'artifacts', appId, 'public', 'data', 'pitches', editingPitchId);
+    await updateDoc(ref, editingPitchForm);
+    setEditingPitchId(null);
+    setEditingPitchForm({ name: '', concept: '', audience: '', impact: 'CAC' });
+  };
+
+  const deletePitch = async (pitch) => {
+    if (!user || (pitch.authorId && pitch.authorId !== user.uid)) return;
+    const stateRef = doc(db, 'artifacts', appId, 'public', 'data', 'workshop_state', 'global');
+    const inTop = workshopState.topThree.findIndex(p => p.id === pitch.id);
+    if (inTop >= 0) {
+      const next = workshopState.topThree.filter(p => p.id !== pitch.id);
+      await updateDoc(stateRef, { topThree: next });
+    }
+    const pitchRef = doc(db, 'artifacts', appId, 'public', 'data', 'pitches', pitch.id);
+    await deleteDoc(pitchRef);
+    if (editingPitchId === pitch.id) setEditingPitchId(null);
   };
 
   const toggleTopThree = async (pitch) => {
@@ -300,6 +457,26 @@ export default function App() {
     lime: '#D9FF00', limeHi: '#FAFFEB', limeDeep: '#99B300'
   };
 
+  // Static ERRC examples – purely visual, not persisted to Firestore or used in pitches.
+  const seedErrcByCategory = {
+    eliminate: [
+      'Generic product grids that ignore fandoms, wall size, or room style.',
+      'Performance campaigns that optimize only for clicks, not first-time collectors.',
+    ],
+    reduce: [
+      'Time from ad click to seeing a wall-ready gallery of Displates.',
+      'Reliance on manual keyword search to find a favorite fandom or artist.',
+    ],
+    raise: [
+      'Depth of AI-powered curation for licensed collections (Marvel, Star Wars, gaming IP).',
+      'Transparency around limited editions, drops, and collector value signals.',
+    ],
+    create: [
+      'An AI “Collection Architect” that auto-builds a 3-piece wall set for any fandom.',
+      'A “Fandom Onboarding” quiz that translates interests into a Displate gallery in under 60 seconds.',
+    ],
+  };
+
   return (
     <div className="antialiased min-h-screen flex flex-col relative overflow-x-hidden" style={{ backgroundColor: colors.alabaster, color: colors.eerieBlack, fontFamily: "'Inter', system-ui, sans-serif" }}>
       {firebaseError && (
@@ -307,6 +484,73 @@ export default function App() {
           Firebase error: {firebaseError?.code ? `${firebaseError.code} — ` : ''}{firebaseError?.message || String(firebaseError)}
         </div>
       )}
+
+      {/* Simple name capture overlay – required before interacting */}
+      {!displayName && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}>
+          <div className="glass-panel max-w-md w-full mx-4 p-6 rounded-lg shadow-xl bg-white">
+            <h2 className="font-heading text-2xl mb-3" style={{ color: colors.nightBlack }}>Welcome to the Workshop</h2>
+            <p className="text-sm mb-4 font-medium" style={{ color: colors.dimGrey }}>
+              Enter your name. It will be attached to anything you add and used in the "Added by" labels.
+            </p>
+            <input
+              type="text"
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSaveDisplayName()}
+              placeholder="Your name"
+              className="w-full p-3 border-2 rounded-sm mb-4 font-medium"
+              style={{ borderColor: colors.dimGrey }}
+            />
+            <button
+              onClick={handleSaveDisplayName}
+              className="w-full font-heading text-lg py-3 rounded-sm"
+              style={{ backgroundColor: colors.nightBlack, color: colors.lime }}
+            >
+              Save & Join
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Pitch edit modal */}
+      {editingPitchId && (() => {
+        const pitch = pitches.find(p => p.id === editingPitchId);
+        if (!pitch) return null;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}>
+            <div className="bg-white max-w-lg w-full rounded-lg shadow-xl border-4 p-6 max-h-[90vh] overflow-y-auto" style={{ borderColor: colors.nightBlack }}>
+              <h3 className="font-heading text-xl mb-4" style={{ color: colors.nightBlack }}>Edit pitch</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase mb-1" style={{ color: colors.orange }}>Initiative code name</label>
+                  <input value={editingPitchForm.name} onChange={(e) => setEditingPitchForm(f => ({ ...f, name: e.target.value }))} className="w-full p-3 border-2 rounded-sm" style={{ borderColor: colors.dimGrey }} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase mb-1" style={{ color: colors.orange }}>Core AI mechanism & value</label>
+                  <textarea rows={3} value={editingPitchForm.concept} onChange={(e) => setEditingPitchForm(f => ({ ...f, concept: e.target.value }))} className="w-full p-3 border-2 rounded-sm" style={{ borderColor: colors.dimGrey }} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase mb-1" style={{ color: colors.orange }}>Target fandom / audience</label>
+                  <input value={editingPitchForm.audience} onChange={(e) => setEditingPitchForm(f => ({ ...f, audience: e.target.value }))} className="w-full p-3 border-2 rounded-sm" style={{ borderColor: colors.dimGrey }} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase mb-1" style={{ color: colors.orange }}>Primary metric impacted</label>
+                  <select value={editingPitchForm.impact} onChange={(e) => setEditingPitchForm(f => ({ ...f, impact: e.target.value }))} className="w-full p-3 border-2 rounded-sm" style={{ borderColor: colors.dimGrey }}>
+                    <option value="CAC">Drastic CAC Reduction</option>
+                    <option value="Virality">Organic Brand Virality</option>
+                    <option value="LTV">First-Purchase LTV Pipeline</option>
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-3 mt-6">
+                <button onClick={saveEditPitch} className="flex-1 font-heading py-3 rounded-sm text-white" style={{ backgroundColor: colors.nightBlack }}>Save</button>
+                <button onClick={cancelEditPitch} className="flex-1 font-bold py-3 rounded-sm border-2" style={{ borderColor: colors.dimGrey, color: colors.dimGrey }}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       
       {/* Global CSS for specifics */}
       <style>{`
@@ -338,6 +582,7 @@ export default function App() {
               <button onClick={() => setActiveTab('ex1')} className={navClass('ex1')}>2. Anti-Problem</button>
               <button onClick={() => setActiveTab('ex2')} className={navClass('ex2')}>3. ERRC Grid</button>
               <button onClick={() => setActiveTab('ex3')} className={navClass('ex3')}>4. The AI Pitch</button>
+              <button onClick={() => setActiveTab('metrics')} className={navClass('metrics')}>4b. Metrics Guide</button>
               <button onClick={() => setActiveTab('finale')} className={navClass('finale')}>5. Top 3 Actions</button>
             </div>
           </div>
@@ -352,16 +597,32 @@ export default function App() {
             <div className="text-[10px] uppercase font-bold tracking-wider leading-none" style={{ color: colors.dimGrey }}>Global Sprint Timer</div>
             <div className="text-xl font-heading leading-none mt-1" style={{ color: colors.nightBlack }}>{timerDisplay}</div>
           </div>
-          <button 
-            onClick={toggleTimer} 
-            className="font-bold px-3 py-1 rounded text-xs ml-2 uppercase tracking-wide transition"
-            style={{ 
-              backgroundColor: workshopState.timer.isRunning ? colors.red : colors.eerieBlack,
-              color: workshopState.timer.isRunning ? colors.white : colors.lime
-            }}
-          >
-            {workshopState.timer.isRunning ? 'Pause' : 'Start'}
-          </button>
+          <div className="flex items-center gap-2 ml-2">
+            <button 
+              onClick={toggleTimer} 
+              className="font-bold px-3 py-1 rounded text-xs uppercase tracking-wide transition"
+              style={{ 
+                backgroundColor: workshopState.timer.isRunning ? colors.red : colors.eerieBlack,
+                color: workshopState.timer.isRunning ? colors.white : colors.lime
+              }}
+            >
+              {workshopState.timer.isRunning ? 'Pause' : 'Start'}
+            </button>
+            <button
+              onClick={resetTimer}
+              className="font-bold px-2 py-1 rounded text-[10px] uppercase tracking-wide transition"
+              style={{ backgroundColor: colors.dimGrey, color: colors.white }}
+            >
+              Reset
+            </button>
+            <button
+              onClick={setTimerFromPrompt}
+              className="font-bold px-2 py-1 rounded text-[10px] uppercase tracking-wide transition"
+              style={{ backgroundColor: colors.blueHi, color: colors.blueDeep }}
+            >
+              Set
+            </button>
+          </div>
         </div>
       </div>
 
@@ -454,15 +715,80 @@ export default function App() {
                       placeholder="Enter a guaranteed conversion killer..." 
                       className="flex-grow p-4 border-2 rounded-sm focus:outline-none font-medium text-lg"
                       style={{ borderColor: colors.dimGrey }}
+                      disabled={!user || !displayName}
                     />
-                    <button onClick={handleAddBadIdea} className="text-white font-heading text-xl px-8 py-4 rounded-sm transition uppercase tracking-wide" style={{ backgroundColor: colors.nightBlack }}>Add Anti-Idea</button>
+                    <button 
+                      onClick={handleAddBadIdea} 
+                      disabled={!user || !displayName}
+                      className="text-white font-heading text-xl px-8 py-4 rounded-sm transition uppercase tracking-wide disabled:opacity-50" 
+                      style={{ backgroundColor: colors.nightBlack }}
+                    >
+                      Add Anti-Idea
+                    </button>
                 </div>
                 
                 <div className="space-y-3">
                   {badIdeas.map(idea => (
-                    <div key={idea.id} className="p-4 rounded-sm border-2 font-bold flex flex-col md:flex-row justify-between items-start md:items-center gap-2" style={{ backgroundColor: colors.alabaster, borderColor: colors.dimGrey, color: colors.nightBlack }}>
-                      <span>❌ {idea.text}</span>
-                      <span className="text-xs px-2 py-1 bg-white border rounded text-gray-500">Added by {idea.author}</span>
+                    <div 
+                      key={idea.id} 
+                      className="p-4 rounded-sm border-2 font-bold flex flex-col gap-2 md:flex-row md:items-center md:justify-between" 
+                      style={{ backgroundColor: colors.alabaster, borderColor: colors.dimGrey, color: colors.nightBlack }}
+                    >
+                      <div className="flex-1">
+                        {editingBadIdeaId === idea.id ? (
+                          <div className="flex flex-col gap-2">
+                            <input
+                              type="text"
+                              value={editingBadIdeaText}
+                              onChange={(e) => setEditingBadIdeaText(e.target.value)}
+                              className="w-full p-2 border-2 rounded-sm text-sm font-medium"
+                              style={{ borderColor: colors.dimGrey, color: colors.nightBlack }}
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                onClick={saveEditBadIdea}
+                                className="px-3 py-1 text-xs rounded-sm font-bold"
+                                style={{ backgroundColor: colors.blue, color: colors.white }}
+                              >
+                                Save
+                              </button>
+                              <button
+                                onClick={cancelEditBadIdea}
+                                className="px-3 py-1 text-xs rounded-sm font-bold"
+                                style={{ backgroundColor: colors.dimGrey, color: colors.white }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <span>❌ {idea.text}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 self-start md:self-auto">
+                        <span className="text-[10px] px-2 py-1 bg-white border rounded font-semibold" style={{ color: colors.dimGrey }}>
+                          Added by {idea.authorName || idea.author || 'anonymous'}
+                        </span>
+                        {user && idea.authorId === user.uid && editingBadIdeaId !== idea.id && (
+                          <>
+                            <button
+                              onClick={() => startEditBadIdea(idea)}
+                              className="text-xs px-2 py-1 rounded-sm font-bold"
+                              style={{ backgroundColor: colors.blueHi, color: colors.blueDeep }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => deleteBadIdea(idea)}
+                              className="text-xs px-2 py-1 rounded-sm font-bold"
+                              style={{ backgroundColor: colors.redHi, color: colors.redDeep }}
+                              aria-label="Delete idea"
+                            >
+                              ✕
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   ))}
                   {badIdeas.length === 0 && <p className="text-gray-400 italic">Awaiting team inputs...</p>}
@@ -502,8 +828,42 @@ export default function App() {
                     </div>
                     <p className="text-sm font-bold mb-4" style={{ color: colors.eerieBlack }}>{grid.q}</p>
                     <ul className="list-disc list-inside font-medium space-y-3 flex-grow overflow-y-auto" style={{ color: colors.nightBlack }}>
-                        {errcIdeas.filter(i => i.category === grid.id).map(idea => (
-                          <li key={idea.id} className="break-words leading-tight">{idea.text}</li>
+                        {seedErrcByCategory[grid.id].map((text, idx) => (
+                          <li key={`seed-${grid.id}-${idx}`} className="break-words leading-tight opacity-80">
+                            {text}
+                          </li>
+                        ))}
+                        {errcIdeas
+                          .filter(i => i.category === grid.id && i.text !== '20k results out of every search')
+                          .map(idea => (
+                          <li key={idea.id} className="flex flex-wrap items-center gap-2 py-1 group">
+                            {editingErrcId === idea.id ? (
+                              <>
+                                <input
+                                  type="text"
+                                  value={editingErrcText}
+                                  onChange={(e) => setEditingErrcText(e.target.value)}
+                                  className="flex-1 min-w-0 p-2 border rounded-sm text-sm"
+                                  style={{ borderColor: grid.line }}
+                                />
+                                <button type="button" onClick={saveEditErrc} className="text-xs font-bold px-2 py-1 rounded-sm text-white" style={{ backgroundColor: grid.line }}>Save</button>
+                                <button type="button" onClick={cancelEditErrc} className="text-xs font-bold px-2 py-1 rounded-sm bg-gray-200 text-gray-800">Cancel</button>
+                              </>
+                            ) : (
+                              <>
+                                <span className="break-words leading-tight flex-1">{idea.text}</span>
+                                {user && idea.authorId === user.uid && (
+                                  <span className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                                    <button type="button" onClick={() => startEditErrc(idea)} className="text-[10px] px-2 py-0.5 rounded font-bold" style={{ backgroundColor: colors.blueHi, color: colors.blueDeep }}>Edit</button>
+                                    <button type="button" onClick={() => deleteErrc(idea)} className="text-[10px] px-2 py-0.5 rounded font-bold" style={{ backgroundColor: colors.redHi, color: colors.redDeep }} aria-label="Delete">✕</button>
+                                  </span>
+                                )}
+                                {idea.authorName && (
+                                  <span className="text-[10px] text-gray-500">by {idea.authorName}</span>
+                                )}
+                              </>
+                            )}
+                          </li>
                         ))}
                     </ul>
                     <div className="mt-4 flex gap-2">
@@ -580,7 +940,18 @@ export default function App() {
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-bold uppercase tracking-widest mb-2" style={{ color: colors.orange }}>Primary Metric Impacted</label>
+                        <label className="block text-sm font-bold uppercase tracking-widest mb-2 flex items-center gap-2" style={{ color: colors.orange }}>
+                          Primary Metric Impacted
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab('metrics')}
+                            className="text-[10px] px-2 py-1 rounded-full font-bold border"
+                            style={{ backgroundColor: colors.orangeHi, borderColor: colors.orangeDeep, color: colors.orangeDeep }}
+                            title="Open metric definitions and examples"
+                          >
+                            ?
+                          </button>
+                        </label>
                         <select 
                           value={pitchForm.impact}
                           onChange={(e) => setPitchForm({...pitchForm, impact: e.target.value})}
@@ -600,6 +971,67 @@ export default function App() {
             <div className="flex justify-between mt-12 items-center">
                 <button onClick={() => setActiveTab('ex2')} className="font-bold py-3 px-6 uppercase tracking-wide" style={{ color: colors.dimGrey }}>⬅️ Back</button>
                 <button onClick={() => setActiveTab('finale')} className="font-heading text-xl py-4 px-10 rounded-sm shadow-xl transition transform hover:-translate-y-1 text-white" style={{ backgroundColor: colors.orange }}>Proceed to Convergence ➡️</button>
+            </div>
+          </section>
+        )}
+
+        {/* --- SECTION 4b: METRICS GUIDE --- */}
+        {activeTab === 'metrics' && (
+          <section className="animate-fade-in block">
+            <div className="mb-8 border-l-8 pl-6" style={{ borderColor: colors.orange }}>
+              <span className="inline-block text-xs px-3 py-1 rounded font-bold uppercase tracking-widest mb-3" style={{ backgroundColor: colors.orangeHi, color: colors.orangeDeep }}>
+                Phase 3 • Metrics Guide
+              </span>
+              <h2 className="text-4xl font-heading mb-4" style={{ color: colors.nightBlack }}>Primary Metrics: Definitions & Examples</h2>
+              <p className="text-lg font-medium" style={{ color: colors.dimGrey }}>
+                Use this guide to align your AI initiative with the right success metric. When you select a metric in the pitch form, you are making a statement about how your idea will change the economics of acquiring and growing Displate collectors.
+              </p>
+            </div>
+
+            <div className="space-y-6">
+              <div className="bg-white p-6 rounded-sm shadow border-2" style={{ borderColor: colors.orangeHi }}>
+                <h3 className="font-heading text-2xl mb-2" style={{ color: colors.orangeDeep }}>Drastic CAC Reduction</h3>
+                <p className="font-medium mb-3" style={{ color: colors.dimGrey }}>
+                  This metric focuses on radically lowering the cost of acquiring a new paying customer while keeping volume and quality of buyers high.
+                </p>
+                <ul className="list-disc list-inside text-sm font-medium space-y-2" style={{ color: colors.nightBlack }}>
+                  <li>Examples: AI media buying that finds pockets of underpriced attention for key fandoms, or creative engines that double click-through and conversion rates without increasing spend.</li>
+                  <li>Good fit if your idea makes every euro of performance marketing significantly more efficient for first-time Displate buyers.</li>
+                </ul>
+              </div>
+
+              <div className="bg-white p-6 rounded-sm shadow border-2" style={{ borderColor: colors.cyanHi }}>
+                <h3 className="font-heading text-2xl mb-2" style={{ color: colors.cyanDeep }}>Organic Brand Virality</h3>
+                <p className="font-medium mb-3" style={{ color: colors.dimGrey }}>
+                  Here the goal is to turn every new collector into an amplifier: someone who brings in more collectors through sharing, social proof, and community mechanics.
+                </p>
+                <ul className="list-disc list-inside text-sm font-medium space-y-2" style={{ color: colors.nightBlack }}>
+                  <li>Examples: AI-personalized shareable wall previews, co-creation tools that generate content people want to post, or referral flows that feel like part of fandom identity rather than a discount mechanic.</li>
+                  <li>Good fit if your idea increases word-of-mouth, UGC, and referral loops so that new paying customers arrive without incremental paid spend.</li>
+                </ul>
+              </div>
+
+              <div className="bg-white p-6 rounded-sm shadow border-2" style={{ borderColor: colors.limeHi }}>
+                <h3 className="font-heading text-2xl mb-2" style={{ color: colors.limeDeep }}>First-Purchase LTV Pipeline</h3>
+                <p className="font-medium mb-3" style={{ color: colors.dimGrey }}>
+                  A “First-Purchase LTV Pipeline” refers to an acquisition strategy where the ultimate goal isn&apos;t just to make a quick initial sale, but to use that first sale as a strategic gateway to a highly profitable, long-term relationship.
+                </p>
+                <ul className="list-disc list-inside text-sm font-medium space-y-2" style={{ color: colors.nightBlack }}>
+                  <li><strong>Focus beyond the single poster:</strong> Instead of just optimizing to sell one metal print (which might barely cover CAC), the initiative is designed to lock the user into the Displate ecosystem.</li>
+                  <li><strong>Predictive matchmaking:</strong> Using AI during that very first interaction to understand the customer&apos;s tastes so well that Displate effectively knows the next 3–5 Displates they will want to buy over the coming months.</li>
+                  <li><strong>The pipeline effect:</strong> Structuring the first purchase so that it naturally leads to joining Displate Club, buying complementary pieces, or building out a full gallery wall over time.</li>
+                  <li>Essentially, this metric is about optimizing marketing and AI systems to attract and nurture “whales” — highly loyal, repeat buyers — rather than one-off impulse purchasers.</li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="flex justify-between mt-12 items-center">
+              <button onClick={() => setActiveTab('ex3')} className="font-bold py-3 px-6 uppercase tracking-wide" style={{ color: colors.dimGrey }}>
+                ⬅️ Back to Pitch Form
+              </button>
+              <button onClick={() => setActiveTab('finale')} className="font-heading text-xl py-4 px-10 rounded-sm shadow-xl transition transform hover:-translate-y-1 text-white" style={{ backgroundColor: colors.orange }}>
+                Proceed to Convergence ➡️
+              </button>
             </div>
           </section>
         )}
@@ -627,6 +1059,8 @@ export default function App() {
                         {/* Seed Data for aesthetics if empty, or just render pitches */}
                         {pitches.map((pitch, idx) => {
                           const isPromoted = workshopState.topThree.some(p => p.id === pitch.id);
+                          // Legacy pitches without authorId can be edited/removed by anyone.
+                          const isOwner = user && (pitch.authorId === user.uid || !pitch.authorId);
                           return (
                             <div 
                               key={pitch.id} 
@@ -634,8 +1068,21 @@ export default function App() {
                               className={`p-4 rounded-sm border-l-4 shadow-sm cursor-pointer transition ${isPromoted ? 'opacity-40 grayscale' : 'hover:border-l-8 hover:bg-gray-100'}`} 
                               style={{ backgroundColor: colors.alabaster, borderLeftColor: [colors.blue, colors.magenta, colors.orange, colors.cyan][idx % 4] }}
                             >
-                                <h4 className="font-bold text-lg" style={{ color: colors.nightBlack }}>{pitch.name} {isPromoted && '✔️'}</h4>
-                                <p className="text-sm mt-1 font-medium" style={{ color: colors.dimGrey }}>{pitch.concept}</p>
+                              <div className="flex justify-between items-start gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <h4 className="font-bold text-lg" style={{ color: colors.nightBlack }}>{pitch.name} {isPromoted && '✔️'}</h4>
+                                  <p className="text-sm mt-1 font-medium" style={{ color: colors.dimGrey }}>{pitch.concept}</p>
+                                  {pitch.authorName && (
+                                    <p className="text-[10px] mt-2 font-semibold" style={{ color: colors.dimGrey }}>Added by {pitch.authorName}</p>
+                                  )}
+                                </div>
+                                {isOwner && (
+                                  <span className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                    <button type="button" onClick={() => startEditPitch(pitch)} className="text-xs px-2 py-1 rounded font-bold" style={{ backgroundColor: colors.blueHi, color: colors.blueDeep }}>Edit</button>
+                                    <button type="button" onClick={() => deletePitch(pitch)} className="text-xs px-2 py-1 rounded font-bold" style={{ backgroundColor: colors.redHi, color: colors.redDeep }} aria-label="Delete pitch">✕</button>
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           )
                         })}
